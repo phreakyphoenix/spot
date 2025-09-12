@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center">
+
+    <Button
+        android:id="@+id/btn_playpause"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:enabled="false"
+        android:text="Play/Pause ⏯️" />
+
+    <Button
+        android:id="@+id/btn_next"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Next ▶️"
+        android:enabled="false"
+        android:layout_marginTop="12dp"/>
+
+    <Button
+        android:id="@+id/btn_prev"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Previous ⏪"
+        android:enabled="false"
+        android:layout_marginTop="12dp"/>
+
+    <Button
+        android:id="@+id/btn_forward"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Forward 10s ⏩"
+        android:enabled="false"
+        android:layout_marginTop="12dp"/>
+
+    <Button
+        android:id="@+id/btn_rewind"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Rewind 10s ⏪"
+        android:enabled="false"
+        android:layout_marginTop="12dp"/>
+
+    <Button
+        android:id="@+id/btn_hi"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Say Hi"
+        android:layout_marginTop="12dp"/>
+
+</LinearLayout>
