@@ -11,15 +11,12 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.example.spot.BuildConfig
 
 
 class MainActivity : AppCompatActivity() {
 
     // SpotifyController instance
     private lateinit var spotify: SpotifyController
-    private val CLIENT_ID = BuildConfig.SPOTIFY_CLIENT_ID
-    private val REDIRECT_URI = BuildConfig.SPOTIFY_REDIRECT_URI
     // KnockDetector instance
     private lateinit var knockDetector: KnockDetector
 
@@ -55,7 +52,7 @@ class MainActivity : AppCompatActivity() {
         hotwordDetector = HotWordDetector(this) 
 
         // Connect to Spotify
-        spotify.connect(CLIENT_ID, REDIRECT_URI) {
+        spotify.connect() {
             Log.d("MainActivity", "Connected to Spotify ✅")
             showToast("Connected to Spotify ✅")
 

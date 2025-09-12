@@ -7,6 +7,7 @@ import com.spotify.android.appremote.api.ConnectionParams
 import com.spotify.android.appremote.api.Connector
 import com.spotify.android.appremote.api.SpotifyAppRemote
 import com.spotify.protocol.types.PlayerState
+import com.example.spot.BuildConfig
 
 // create helper function for toast and vibration feedback
 fun Activity.feedback(message: String, duration: Long = 100) {
@@ -36,8 +37,11 @@ class SpotifyController(private val activity: Activity) {
     }
 
     private var spotifyAppRemote: SpotifyAppRemote? = null
+    private val clientId = BuildConfig.SPOTIFY_CLIENT_ID
+    private val redirectUri = BuildConfig.SPOTIFY_REDIRECT_URI
 
-    fun connect(clientId: String, redirectUri: String, onConnected: () -> Unit = {}) {
+
+    fun connect(onConnected: () -> Unit = {}) {
         val connectionParams = ConnectionParams.Builder(clientId)
             .setRedirectUri(redirectUri)
             .showAuthView(true) // forces login UI
