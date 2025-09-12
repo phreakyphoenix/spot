@@ -92,16 +92,21 @@ class PorcupineForegroundService : Service() {
             }
             Log.d(TAG, "Detected keyword: $kw (index $keywordIndex)")
 
-            if (kw == "skip_ten") {
-                SpotifyController.getInstance()?.forward(10)
-                Log.d(TAG, "Spotify forward 10s triggered by hotword")
+            if (kw == "jarvis") {
+                // Start recognition
+                CommandRecognizer.startListening(applicationContext)
+                Log.d(TAG, "CommandRecognizer started listening triggered by hotword")
             }
+            // else if (kw == "skip_ten") {
+            //     SpotifyController.getInstance()?.forward(10)
+            //     Log.d(TAG, "Spotify forward 10s triggered by hotword")
+            // }
 
             val n = buildNotification("Wake word detected", "Detected '$kw'")
             val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             nm.notify(NOTIF_ID, n)
         }
-        
+
         porcupineManager = PorcupineManager.Builder()
             .setAccessKey(PICO_ACCESS_KEY)
             .setKeywordPaths(keywordPaths)
