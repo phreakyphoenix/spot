@@ -3,20 +3,17 @@ package com.example.spot
 import android.app.*
 import android.content.Context
 import android.content.Intent
-import android.media.*
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import ai.picovoice.porcupine.Porcupine
-import ai.picovoice.porcupine.PorcupineException
+import ai.picovoice.porcupine.PorcupineManager
+import ai.picovoice.porcupine.PorcupineManagerCallback
+import com.example.spot.BuildConfig
+import kotlin.concurrent.thread
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import kotlin.concurrent.thread
-import com.example.spot.BuildConfig
 
 class HotWordDetector(private val context: Context) {
 
@@ -49,9 +46,6 @@ class HotWordDetector(private val context: Context) {
     }
 }
 
-/**
- * Foreground service using low-level Porcupine with AudioRecord.
- */
 class PorcupineForegroundService : Service() {
 
     private val TAG = "PorcupineFgService"
@@ -59,8 +53,7 @@ class PorcupineForegroundService : Service() {
     private val NOTIF_ID = 12345
     private val PICO_ACCESS_KEY = BuildConfig.PICOVOICE_ACCESS_KEY
 
-    private var porcupine: Porcupine? = null
-    private var audioRecord: AudioRecord? = null
+    private var porcupineManager: PorcupineManager? = null
     private var running = false
 
     private val KEYWORDS_ASSETS = arrayOf("jarvis_android.ppn", "skip_ten.ppn")
@@ -77,9 +70,9 @@ class PorcupineForegroundService : Service() {
 
         thread {
             try {
-                initAndStartPorcupine()
+                initAndStartPorcupineManager()
             } catch (t: Throwable) {
-                Log.e(TAG, "Failed to start Porcupine", t)
+                Log.e(TAG, "Failed to start PorcupineManager", t)
                 stopSelf()
             }
         }
@@ -87,117 +80,48 @@ class PorcupineForegroundService : Service() {
         return START_STICKY
     }
 
-    private fun initAndStartPorcupine() {
+    private fun initAndStartPorcupineManager() {
         val filesDir = filesDir
-        val keywordPaths = ArrayList<String>()
+        val keywordPaths = KEYWORDS_ASSETS.map { copyAssetToFileIfNeeded(filesDir, it) }.toTypedArray()
 
-        try {
-            val modelPath = copyAssetToFileIfNeeded(filesDir, MODEL_ASSET)
-            for (k in KEYWORDS_ASSETS) {
-                keywordPaths.add(copyAssetToFileIfNeeded(filesDir, k))
+        val porc_callback = PorcupineManagerCallback { keywordIndex ->
+            val kw = when (keywordIndex) {
+                0 -> "jarvis"
+                1 -> "skip_ten"
+                else -> "keyword_$keywordIndex"
+            }
+            Log.d(TAG, "Detected keyword: $kw (index $keywordIndex)")
+
+            if (kw == "skip_ten") {
+                SpotifyController.getInstance()?.forward(10)
+                Log.d(TAG, "Spotify forward 10s triggered by hotword")
             }
 
-            porcupine = Porcupine.Builder()
-                .setAccessKey(PICO_ACCESS_KEY)
-                .setKeywordPaths(keywordPaths.toTypedArray())
-                .setModelPath(modelPath)
-                .setSensitivities(floatArrayOf(0.9f, 0.9f))
-                .build(applicationContext)
-
-            audioRecord = createAudioRecord()
-            audioRecord?.startRecording()
-            running = true
-
-            val frameLength = porcupine!!.frameLength
-            val buffer = ShortArray(frameLength)
-
-            while (running) {
-                val read = audioRecord!!.read(buffer, 0, frameLength)
-                if (read == frameLength) {
-                    try {
-                        val keywordIndex = porcupine!!.process(buffer)
-                        if (keywordIndex >= 0) {
-                            val kw = when (keywordIndex) {
-                                0 -> "jarvis"
-                                1 -> "skip_ten"
-                                else -> "keyword_$keywordIndex"
-                            }
-                            Log.d(TAG, "Detected keyword: $kw (index $keywordIndex)")
-
-                            // Handle Spotify forward directly
-                            if (kw == "skip_ten") {
-                                SpotifyController.getInstance()?.forward(10)
-                                Log.d(TAG, "Spotify forward 10s triggered by hotword")
-                            }
-
-                            val n = buildNotification("Wake word detected", "Detected '$kw'")
-                            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                            nm.notify(NOTIF_ID, n)
-                        }
-                    } catch (e: PorcupineException) {
-                        Log.e(TAG, "Porcupine process error", e)
-                    }
-                }
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error initializing Porcupine", e)
-            stopSelf()
+            val n = buildNotification("Wake word detected", "Detected '$kw'")
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIF_ID, n)
         }
-    }
+        
+        porcupineManager = PorcupineManager.Builder()
+            .setAccessKey(PICO_ACCESS_KEY)
+            .setKeywordPaths(keywordPaths)
+            .setSensitivities(floatArrayOf(0.9f, 0.9f))
+            .build(applicationContext, porc_callback)
 
-    private fun createAudioRecord(): AudioRecord {
-        val sampleRate = 16000
-        val bufferSize = AudioRecord.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
-
-        val record = AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufferSize)
-            .build()
-
-        if (record.state != AudioRecord.STATE_INITIALIZED) {
-            throw IllegalStateException("AudioRecord failed to initialize")
-        }
-
-        if (AcousticEchoCanceler.isAvailable()) {
-            val aec = AcousticEchoCanceler.create(record.audioSessionId)
-            aec.enabled = true
-            Log.d(TAG, "AEC enabled: ${aec.enabled}")
-        }
-
-        if (NoiseSuppressor.isAvailable()) {
-            val ns = NoiseSuppressor.create(record.audioSessionId)
-            Log.d(TAG, "NS created: $ns")
-            ns.enabled = true
-        }
-
-        return record
+        porcupineManager?.start()
+        running = true
     }
 
     override fun onDestroy() {
         super.onDestroy()
         running = false
-        audioRecord?.stop()
-        audioRecord?.release()
-        audioRecord = null
-
         try {
-            porcupine?.delete()
+            porcupineManager?.stop()
+            porcupineManager?.delete()
         } catch (e: Exception) {
-            Log.w(TAG, "Exception stopping Porcupine", e)
+            Log.w(TAG, "Exception stopping PorcupineManager", e)
         }
-        porcupine = null
+        porcupineManager = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
