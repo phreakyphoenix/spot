@@ -76,7 +76,28 @@ class SpotifyController(private val activity: Activity) {
     }
 
     fun skipToNext() = spotifyAppRemote?.playerApi?.skipNext()
-    fun skipToPrevious() = spotifyAppRemote?.playerApi?.skipPrevious()
+
+    fun skipToPrevious(maxRetries: Int = 2) {
+    spotifyAppRemote?.playerApi?.playerState?.setResultCallback { state ->
+        val initialTrack = state.track?.name
+        Log.d("SpotifyController", "Initial track: $initialTrack")
+
+        fun attempt(retriesLeft: Int) {
+            spotifyAppRemote?.playerApi?.skipPrevious()
+            // delay to allow track to update
+            Thread.sleep(200)
+            spotifyAppRemote?.playerApi?.playerState?.setResultCallback { newState ->
+                val newTrack = newState.track?.name
+                Log.d("SpotifyController", "New track: $newTrack, Retries left: $retriesLeft")
+                if (newTrack == initialTrack && retriesLeft > 0) {
+                    attempt(retriesLeft - 1) // retry
+                }
+            }
+        }
+
+        attempt(maxRetries)
+    }
+}
     
     fun forward(seconds: Long) {
         spotifyAppRemote?.playerApi?.playerState?.setResultCallback { state ->
