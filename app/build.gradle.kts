@@ -29,7 +29,7 @@ android {
         // Inject secrets from local.properties
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${localProps["SPOTIFY_CLIENT_ID"]}\"")
         buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"${localProps["SPOTIFY_REDIRECT_URI"]}\"")
-        buildConfigField("String", "ACCESS_KEY", "\"${localProps["ACCESS_KEY"]}\"")
+        buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${localProps["PICOVOICE_ACCESS_KEY"]}\"")
     }
 
     buildTypes {

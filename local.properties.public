@@ -1,0 +1,9 @@
+# Replace everything here with your own values and rename to local.properties
+sdk.dir=/path/to/your/Android/sdk
+
+# Spotify API credentials
+SPOTIFY_CLIENT_ID=YOUR_SPOTIFY_CLIENT_ID_HERE
+SPOTIFY_REDIRECT_URI=YOUR_SPOTIFY_REDIRECT_URI_HERE
+
+# Picovoice Picovoice access key
+PICOVOICE_ACCESS_KEY=YOUR_PICOVOICE_ACCESS_KEY_HERE

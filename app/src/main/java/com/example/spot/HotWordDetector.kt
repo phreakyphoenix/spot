@@ -57,7 +57,7 @@ class PorcupineForegroundService : Service() {
     private val TAG = "PorcupineFgService"
     private val NOTIF_CHANNEL_ID = "porcupine_fg_channel"
     private val NOTIF_ID = 12345
-    private val ACCESS_KEY = BuildConfig.ACCESS_KEY
+    private val PICO_ACCESS_KEY = BuildConfig.PICOVOICE_ACCESS_KEY
 
     private var porcupine: Porcupine? = null
     private var audioRecord: AudioRecord? = null
@@ -98,7 +98,7 @@ class PorcupineForegroundService : Service() {
             }
 
             porcupine = Porcupine.Builder()
-                .setAccessKey(ACCESS_KEY)
+                .setAccessKey(PICO_ACCESS_KEY)
                 .setKeywordPaths(keywordPaths.toTypedArray())
                 .setModelPath(modelPath)
                 .setSensitivities(floatArrayOf(0.9f, 0.9f))
