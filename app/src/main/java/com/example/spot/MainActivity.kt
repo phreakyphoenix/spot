@@ -15,8 +15,6 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
-    // SpotifyController instance
-    private lateinit var spotify: SpotifyController
     // KnockDetector instance
     private lateinit var knockDetector: KnockDetector
     // DebugLogger instance
@@ -46,12 +44,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        spotify = SpotifyController(this)
+        SpotifyController.init(this)
+        Log.w("MainActivity", "SpotifyController initialized")
         knockDetector = KnockDetector(this)
         debugLogger.init(this)
 
         // Connect to Spotify
-        spotify.connect() {
+        SpotifyController.connect() {
             Log.d("MainActivity", "Connected to Spotify ✅")
             showToast("Connected to Spotify ✅")
 
@@ -70,31 +69,31 @@ class MainActivity : AppCompatActivity() {
 
         // Buttons (direct Spotify calls)
         findViewById<Button>(R.id.btn_next).setOnClickListener {
-            spotify.skipToNext()
+            SpotifyController.skipToNext()
             Log.d("MainActivity", "Next track pressed")
             showToast("Next track ▶️")
         }
 
         findViewById<Button>(R.id.btn_prev).setOnClickListener {
-            spotify.skipToPrevious()
+            SpotifyController.skipToPrevious()
             Log.d("MainActivity", "Previous track pressed")
             showToast("Previous track ⏪")
         }
 
         findViewById<Button>(R.id.btn_playpause).setOnClickListener {
-            spotify.playPause()
+            SpotifyController.playPause()
             Log.d("MainActivity", "Play/Pause pressed")
             showToast("Play/Pause ⏯️")
         }
 
         findViewById<Button>(R.id.btn_forward).setOnClickListener {
-            spotify.forward(10)
+            SpotifyController.forward(10)
             Log.d("MainActivity", "Forward 10s pressed")
             showToast("Forward 10s ⏩")
         }
 
         findViewById<Button>(R.id.btn_rewind).setOnClickListener {
-            spotify.rewind(10)
+            SpotifyController.rewind(10)
             Log.d("MainActivity", "Rewind 10s pressed")
             showToast("Rewind 10s ⏪")
         }
@@ -110,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         knockDetector.stop()
         // Stop the audio pipeline service
         stopAudioPipelineService()
-        spotify.disconnect()
+        SpotifyController.disconnect()
     }
 
     private fun ensurePermissionsAndStartService() {

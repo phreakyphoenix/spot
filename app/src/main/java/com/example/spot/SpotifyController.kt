@@ -6,45 +6,30 @@ import android.widget.Toast
 import com.spotify.android.appremote.api.ConnectionParams
 import com.spotify.android.appremote.api.Connector
 import com.spotify.android.appremote.api.SpotifyAppRemote
-import com.spotify.protocol.types.PlayerState
 import com.example.spot.BuildConfig
 
-// create helper function for toast and vibration feedback
-fun Activity.feedback(message: String, duration: Long = 100) {
-    runOnUiThread {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+object SpotifyController {
 
-        val vibrator = getSystemService(Activity.VIBRATOR_SERVICE) as android.os.Vibrator
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            vibrator.vibrate(android.os.VibrationEffect.createOneShot(duration, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(duration)
-        }
-    }
-}
-
-
-class SpotifyController(private val activity: Activity) {
-
-    companion object {
-        private var instance: SpotifyController? = null
-        fun getInstance(): SpotifyController? = instance
-    }
-
-    init {
-        instance = this
-    }
-
+    private var activity: Activity? = null
     private var spotifyAppRemote: SpotifyAppRemote? = null
     private val clientId = BuildConfig.SPOTIFY_CLIENT_ID
     private val redirectUri = BuildConfig.SPOTIFY_REDIRECT_URI
 
+    fun init(activity: Activity) {
+        this.activity = activity
+    }
+
+    private fun showToast(message: String, duration: Int = Toast.LENGTH_SHORT) {
+        activity?.runOnUiThread {
+            Toast.makeText(activity, message, duration).show()
+        }
+    }
 
     fun connect(onConnected: () -> Unit = {}) {
+        val activity = this.activity ?: return
         val connectionParams = ConnectionParams.Builder(clientId)
             .setRedirectUri(redirectUri)
-            .showAuthView(true) // forces login UI
+            .showAuthView(true)
             .build()
 
         SpotifyAppRemote.connect(activity, connectionParams, object : Connector.ConnectionListener {
@@ -56,7 +41,7 @@ class SpotifyController(private val activity: Activity) {
 
             override fun onFailure(throwable: Throwable) {
                 Log.e("SpotifyController", "Failed to connect to Spotify ❌", throwable)
-                Toast.makeText(activity, "Spotify login required ❌", Toast.LENGTH_LONG).show()
+                showToast("Spotify login required ❌", Toast.LENGTH_LONG)
             }
         })
     }
@@ -78,46 +63,44 @@ class SpotifyController(private val activity: Activity) {
     fun skipToNext() = spotifyAppRemote?.playerApi?.skipNext()
 
     fun skipToPrevious(maxRetries: Int = 2) {
-    spotifyAppRemote?.playerApi?.playerState?.setResultCallback { state ->
-        val initialTrack = state.track?.name
-        Log.d("SpotifyController", "Initial track: $initialTrack")
+        spotifyAppRemote?.playerApi?.playerState?.setResultCallback { state ->
+            val initialTrack = state.track?.name
+            Log.d("SpotifyController", "Initial track: $initialTrack")
 
-        fun attempt(retriesLeft: Int) {
-            spotifyAppRemote?.playerApi?.skipPrevious()
-            // delay to allow track to update
-            Thread.sleep(200)
-            spotifyAppRemote?.playerApi?.playerState?.setResultCallback { newState ->
-                val newTrack = newState.track?.name
-                Log.d("SpotifyController", "New track: $newTrack, Retries left: $retriesLeft")
-                if (newTrack == initialTrack && retriesLeft > 0) {
-                    attempt(retriesLeft - 1) // retry
+            fun attempt(retriesLeft: Int) {
+                spotifyAppRemote?.playerApi?.skipPrevious()
+                Thread.sleep(200)
+                spotifyAppRemote?.playerApi?.playerState?.setResultCallback { newState ->
+                    val newTrack = newState.track?.name
+                    Log.d("SpotifyController", "New track: $newTrack, Retries left: $retriesLeft")
+                    if (newTrack == initialTrack && retriesLeft > 0) {
+                        attempt(retriesLeft - 1)
+                    }
                 }
             }
-        }
 
-        attempt(maxRetries)
+            attempt(maxRetries)
+        }
     }
-}
-    
-    fun forward(seconds: Long) {
+
+    fun forward(seconds: Int) {
         spotifyAppRemote?.playerApi?.playerState?.setResultCallback { state ->
             spotifyAppRemote?.playerApi?.seekTo(state.playbackPosition + seconds * 1000)
         }
-        activity.feedback("Forward ⏩ $seconds seconds")
+        showToast("Forward ⏩ $seconds seconds")
     }
 
-    fun rewind(seconds: Long) {
+    fun rewind(seconds: Int) {
         spotifyAppRemote?.playerApi?.playerState?.setResultCallback { state ->
             val newPos = (state.playbackPosition - seconds * 1000).coerceAtLeast(0)
             spotifyAppRemote?.playerApi?.seekTo(newPos)
-            activity.feedback("Rewind ⏪ $seconds seconds")
         }
+        showToast("Rewind ⏪ $seconds seconds")
     }
 
     fun playPlaylist(playlistUri: String) {
         spotifyAppRemote?.playerApi?.play(playlistUri)
     }
-
 
     fun isConnected() = spotifyAppRemote != null
 }

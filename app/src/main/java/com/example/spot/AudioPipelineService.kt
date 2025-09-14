@@ -10,25 +10,22 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import androidx.core.app.NotificationCompat
-import ai.picovoice.porcupine.Porcupine
-import ai.picovoice.porcupine.PorcupineException
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.concurrent.thread
-import com.spotify.protocol.client.Debug
+import com.spotify.protocol.client.Debug 
 
 class AudioPipelineService : Service() {
-    
+
     companion object {
         const val CHANNEL_ID = "AudioPipelineChannel"
         const val NOTIFICATION_ID = 1
         private const val TAG = "AudioPipelineService"
-        
+
         fun startService(context: Context) {
             val intent = Intent(context, AudioPipelineService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -37,102 +34,115 @@ class AudioPipelineService : Service() {
                 context.startService(intent)
             }
         }
-        
+
         fun stopService(context: Context) {
             val intent = Intent(context, AudioPipelineService::class.java)
             context.stopService(intent)
         }
     }
-    
+
     // Audio configuration
     private val SAMPLE_RATE = 16000
     private val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
     private val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-    
-    // Pipeline state
-    private enum class PipelineState {
-        HOTWORD_DETECTION,
-        COMMAND_RECOGNITION,
-        STOPPED
-    }
-    
-    private var currentState = PipelineState.STOPPED
+
     private var isRunning = false
-    
+
     // Audio components
     private var audioRecord: AudioRecord? = null
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
-    
-    // Porcupine (Hotword Detection)
-    private var porcupine: Porcupine? = null
-    
-    // Vosk (Command Recognition)
+
+    // Command recognition (Vosk)
     private var voskModel: Model? = null
     private var voskRecognizer: Recognizer? = null
-    private val COMMAND_GRAMMAR = """["play", "pause", "stop", "next", "previous", "skip ten", "rewind ten", "whisper"]"""
+
+    /*** Grammar setup ***/
+    private fun numberToWords(n: Int): String {
+        return when (n) {
+            in 1..60 -> numberWords.filterValues { it == n }.keys.first()
+            else -> ""
+        }
+    }
     
-    // Timing for command recognition
-    private var commandStartTime = 0L
-    private val COMMAND_TIMEOUT_MS = 2500L // 2.5 seconds
-    
+    private val numberWords: Map<String, Int> = mapOf(
+        "one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5,
+        "six" to 6, "seven" to 7, "eight" to 8, "nine" to 9, "ten" to 10,
+        "eleven" to 11, "twelve" to 12, "thirteen" to 13, "fourteen" to 14, "fifteen" to 15,
+        "sixteen" to 16, "seventeen" to 17, "eighteen" to 18, "nineteen" to 19, "twenty" to 20,
+        "twenty one" to 21, "twenty two" to 22, "twenty three" to 23, "twenty four" to 24, "twenty five" to 25,
+        "twenty six" to 26, "twenty seven" to 27, "twenty eight" to 28, "twenty nine" to 29, "thirty" to 30,
+        "thirty one" to 31, "thirty two" to 32, "thirty three" to 33, "thirty four" to 34, "thirty five" to 35,
+        "thirty six" to 36, "thirty seven" to 37, "thirty eight" to 38, "thirty nine" to 39, "forty" to 40,
+        "forty one" to 41, "forty two" to 42, "forty three" to 43, "forty four" to 44, "forty five" to 45,
+        "forty six" to 46, "forty seven" to 47, "forty eight" to 48, "forty nine" to 49, "fifty" to 50,
+        "fifty one" to 51, "fifty two" to 52, "fifty three" to 53, "fifty four" to 54, "fifty five" to 55,
+        "fifty six" to 56, "fifty seven" to 57, "fifty eight" to 58, "fifty nine" to 59, "sixty" to 60
+    )
+
+    private val baseCommands = listOf("play","pause","stop","next","previous", "skip","rewind")
+
+    private val numberedCommands = (1..60).map { numberToWords(it) }
+        // Build skip and rewind commands with numbers
+    private val skipCommands = numberedCommands.map { "skip $it" }
+    private val rewindCommands = numberedCommands.map { "rewind $it" }
+
+    private val prefixedCommands = (baseCommands + skipCommands + rewindCommands).map { "jarvis $it" }.toSet()
+
+    private val COMMAND_GRAMMAR =
+        "[${prefixedCommands.joinToString(",") { "\"$it\"" }}]"
+
+
     override fun onCreate() {
+        DebugLogger.serviceLog(tag = TAG, message = "grammar is $COMMAND_GRAMMAR")
         super.onCreate()
         createNotificationChannel()
         DebugLogger.serviceLog(TAG, "AudioPipelineService created")
     }
-    
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         DebugLogger.serviceLog(TAG, "AudioPipelineService starting...")
-        
-        val notification = createNotification()
-        startForeground(NOTIFICATION_ID, notification)
-        
-        // Start the audio pipeline
+        startForeground(NOTIFICATION_ID, createNotification())
         startAudioPipeline()
-        
-        return START_STICKY // Restart if killed by system
+        return START_STICKY
     }
-    
+
+
     override fun onDestroy() {
         super.onDestroy()
         DebugLogger.serviceLog(TAG, "AudioPipelineService destroyed")
-
-        // Stop the audio pipeline
         stopAudioPipeline()
     }
-    
+
     override fun onBind(intent: Intent?): IBinder? = null
-    
+
+    /*** Notification ***/
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Voice Control Service",
-                NotificationManager.IMPORTANCE_LOW
+                CHANNEL_ID, "Voice Control Service", NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Listens for voice commands"
                 setSound(null, null)
                 enableVibration(false)
             }
-            
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(channel)
         }
     }
-    
+
     private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, 
+            this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Voice Control Active")
-            .setContentText("Say 'Jarvis' followed by commands")
+            .setContentText("Listening for commands")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -141,17 +151,18 @@ class AudioPipelineService : Service() {
             .setVibrate(null)
             .build()
     }
-    
+
+    /*** Pipeline control ***/
     private fun startAudioPipeline() {
         if (isRunning) {
             DebugLogger.w(TAG, "Audio pipeline already running")
             return
         }
-        
+
         thread {
             try {
                 initializeComponents()
-                runAudioPipeline()
+                runAudioLoop()
             } catch (e: Exception) {
                 DebugLogger.e(TAG, "Error in audio pipeline", e, showToast = true, showNotif = true)
             } finally {
@@ -159,304 +170,173 @@ class AudioPipelineService : Service() {
             }
         }
     }
-    
+
     private fun stopAudioPipeline() {
         isRunning = false
-        currentState = PipelineState.STOPPED
         DebugLogger.serviceLog(TAG, "Pipeline stop requested")
     }
-    
-    private fun initializeComponents() {
-        DebugLogger.serviceLog(TAG, "Initializing audio components...")
 
-        // Initialize Porcupine
-        try {
-            porcupine = Porcupine.Builder()
-                .setAccessKey(BuildConfig.PICOVOICE_ACCESS_KEY) // Replace with actual key
-                .setKeywordPath(getKeywordPath("jarvis"))
-                .setSensitivity(0.9f)
-                .build(this)
-            DebugLogger.serviceLog(TAG, "Porcupine initialized successfully")
-        } catch (e: PorcupineException) {
-            DebugLogger.e(TAG, "Failed to initialize Porcupine", e, showToast = true, showNotif = true)
-            throw e
-        }
-        
-        // Initialize Vosk
+    /*** Component initialization ***/
+    private fun initializeComponents() {
+        initializeVosk()
+        initializeAudioRecord()
+        initializeAudioEffects()
+        DebugLogger.serviceLog(TAG, "Audio components initialized")
+    }
+
+    private fun initializeVosk() {
         try {
             val modelPath = copyAssetFolderIfNeeded("vosk-model-small-en-us-0.15")
             voskModel = Model(modelPath)
-            voskRecognizer = Recognizer(voskModel, SAMPLE_RATE.toFloat())
-            voskRecognizer?.setGrammar(COMMAND_GRAMMAR)
-            DebugLogger.serviceLog(TAG, "Vosk initialized successfully")
+            voskRecognizer = Recognizer(voskModel, SAMPLE_RATE.toFloat()).apply {
+                setGrammar(COMMAND_GRAMMAR)
+            }
+            DebugLogger.serviceLog(TAG, "Vosk initialized")
         } catch (e: Exception) {
             DebugLogger.e(TAG, "Failed to initialize Vosk", e, showToast = true, showNotif = true)
             throw e
         }
-        
-        // Initialize AudioRecord with AEC and NS (from original HotWordDetector_raw.kt)
+    }
+
+    private fun initializeAudioRecord() {
         val minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         val bufferSize = minBufferSize * 2
 
-        DebugLogger.serviceLog(TAG, "Creating AudioRecord with buffer size: $bufferSize, min: $minBufferSize")
+        DebugLogger.serviceLog(TAG, "Creating AudioRecord buffer: $bufferSize, min: $minBufferSize")
 
-        try {
-            audioRecord = AudioRecord.Builder()
-                .setAudioSource(MediaRecorder.AudioSource.VOICE_PERFORMANCE)
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AUDIO_FORMAT)
-                        .setSampleRate(SAMPLE_RATE)
-                        .setChannelMask(CHANNEL_CONFIG)
-                        .build()
-                )
-                .setBufferSizeInBytes(bufferSize)
-                .build()
-                
-            val state = audioRecord?.state
-            DebugLogger.serviceLog(TAG, "AudioRecord created with state: $state")
+        audioRecord = AudioRecord.Builder()
+            .setAudioSource(MediaRecorder.AudioSource.VOICE_PERFORMANCE)
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AUDIO_FORMAT)
+                    .setSampleRate(SAMPLE_RATE)
+                    .setChannelMask(CHANNEL_CONFIG)
+                    .build()
+            )
+            .setBufferSizeInBytes(bufferSize)
+            .build()
 
-            if (state != AudioRecord.STATE_INITIALIZED) {
-                throw RuntimeException("AudioRecord not properly initialized, state: $state")
-            }
-        } catch (e: Exception) {
-            DebugLogger.e(TAG, "Failed to create AudioRecord", e, showToast = true, showNotif = true)
-            throw e
+        val state = audioRecord?.state
+        if (state != AudioRecord.STATE_INITIALIZED) {
+            throw RuntimeException("AudioRecord not initialized, state: $state")
         }
-        
-        // Enable AEC and NS if available (from original HotWordDetector_raw.kt)
-        val audioSessionId = audioRecord?.audioSessionId ?: 0
-        DebugLogger.serviceLog(TAG, "Audio session ID: $audioSessionId")
+    }
+
+    private fun initializeAudioEffects() {
+        val sessionId = audioRecord?.audioSessionId ?: 0
 
         if (AcousticEchoCanceler.isAvailable()) {
-            try {
-                echoCanceler = AcousticEchoCanceler.create(audioSessionId)
-                echoCanceler?.enabled = true
-                DebugLogger.serviceLog(TAG, "AEC enabled successfully")
-            } catch (e: Exception) {
-                DebugLogger.e(TAG, "Failed to enable AEC", e, showToast = true, showNotif = true)
-            }
-        } else {
-            DebugLogger.w(TAG, "AEC not available on this device")
-        }
-        
-        if (NoiseSuppressor.isAvailable()) {
-            try {
-                noiseSuppressor = NoiseSuppressor.create(audioSessionId)
-                noiseSuppressor?.enabled = true
-                DebugLogger.serviceLog(TAG, "Noise suppressor enabled successfully")
-            } catch (e: Exception) {
-                DebugLogger.e(TAG, "Failed to enable noise suppressor", e, showToast = true, showNotif = true)
-            }
-        } else {
-            DebugLogger.w(TAG, "Noise suppressor not available on this device")
-        }
+            echoCanceler = AcousticEchoCanceler.create(sessionId)?.apply { enabled = true }
+            DebugLogger.serviceLog(TAG, "AEC enabled")
+        } else DebugLogger.w(TAG, "AEC not available")
 
-        DebugLogger.serviceLog(TAG, "Audio components initialized successfully")
+        if (NoiseSuppressor.isAvailable()) {
+            noiseSuppressor = NoiseSuppressor.create(sessionId)?.apply { enabled = true }
+            DebugLogger.serviceLog(TAG, "Noise suppressor enabled")
+        } else DebugLogger.w(TAG, "Noise suppressor not available")
     }
-    
-    private fun runAudioPipeline() {
+
+    /*** Audio loop ***/
+    private fun runAudioLoop() {
         audioRecord?.startRecording()
         isRunning = true
-        currentState = PipelineState.HOTWORD_DETECTION
+        val buffer = ShortArray(512) // fixed buffer for simplicity
 
-        DebugLogger.serviceLog(TAG, "Audio pipeline started - listening for hotword")
-
-        val porcupineFrameLength = porcupine?.frameLength ?: return
-        val audioBuffer = ShortArray(porcupineFrameLength)
-        
         while (isRunning) {
-            val bytesRead = audioRecord?.read(audioBuffer, 0, audioBuffer.size) ?: 0
-            
-            if (bytesRead > 0) {
-                when (currentState) {
-                    PipelineState.HOTWORD_DETECTION -> {
-                        processHotwordDetection(audioBuffer)
-                    }
-                    PipelineState.COMMAND_RECOGNITION -> {
-                        processCommandRecognition(audioBuffer, bytesRead)
-                    }
-                    PipelineState.STOPPED -> {
-                        break
-                    }
-                }
-            }
+            val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+            if (read > 0) processCommand(buffer, read)
         }
-        
+
         audioRecord?.stop()
-        DebugLogger.serviceLog(TAG, "Audio pipeline stopped")
     }
-    
-    private fun processHotwordDetection(audioBuffer: ShortArray) {
+
+    private fun processCommand(audioBuffer: ShortArray, samplesRead: Int) {
         try {
-            val keywordIndex = porcupine?.process(audioBuffer) ?: -1
-            
-            if (keywordIndex >= 0) {
-                DebugLogger.serviceLog(TAG, "Hotword 'Jarvis' detected! Switching to command recognition")
-                switchToCommandRecognition()
-            }
-        } catch (e: PorcupineException) {
-            DebugLogger.e(TAG, "Error processing hotword detection", e)
-        }
-    }
-    
-    private fun processCommandRecognition(audioBuffer: ShortArray, samplesRead: Int) {
-        try {
-            // Check timeout
-            if (System.currentTimeMillis() - commandStartTime > COMMAND_TIMEOUT_MS) {
-                DebugLogger.serviceLog(TAG, "Command recognition timeout - switching back to hotword detection")
-                switchToHotwordDetection()
-                return
-            }
-            
-            // Convert ShortArray to ByteArray for Vosk
             val byteBuffer = ByteArray(samplesRead * 2)
             for (i in 0 until samplesRead) {
                 val sample = audioBuffer[i]
                 byteBuffer[i * 2] = (sample.toInt() and 0xFF).toByte()
                 byteBuffer[i * 2 + 1] = ((sample.toInt() shr 8) and 0xFF).toByte()
             }
-            
+
             if (voskRecognizer?.acceptWaveForm(byteBuffer, byteBuffer.size) == true) {
-                val resultJson = voskRecognizer?.result ?: ""
-                handleCommand(resultJson)
+                handleCommand(voskRecognizer?.result ?: "")
             }
         } catch (e: Exception) {
-            DebugLogger.e(TAG, "Error processing command recognition", e)
-            switchToHotwordDetection()
+            DebugLogger.e(TAG, "Command processing error", e)
         }
     }
-    
-    private fun switchToCommandRecognition() {
-        currentState = PipelineState.COMMAND_RECOGNITION
-        commandStartTime = System.currentTimeMillis()
-        voskRecognizer?.reset()
-        DebugLogger.serviceLog(TAG, "Switched to command recognition mode")
-    }
-    
-    private fun switchToHotwordDetection() {
-        currentState = PipelineState.HOTWORD_DETECTION
-        DebugLogger.serviceLog(TAG, "Switched to hotword detection mode")
-    }
-    
+
     private fun handleCommand(resultJson: String) {
         try {
-            val command = JSONObject(resultJson).getString("text").trim()
-            
-            if (command.isNotEmpty()) {
-                DebugLogger.serviceLog(TAG, "Recognized command: $command")
-                
-                when (command.lowercase()) {
-                    "play", "pause", "stop" -> {
-                        SpotifyController.getInstance()?.playPause()
-                        switchToHotwordDetection()
-                    }
-                    "next" -> {
-                        SpotifyController.getInstance()?.skipToNext()
-                        switchToHotwordDetection()
-                    }
-                    "previous" -> {
-                        SpotifyController.getInstance()?.skipToPrevious()
-                        switchToHotwordDetection()
-                    }
-                    "skip ten" -> {
-                        SpotifyController.getInstance()?.forward(10)
-                        switchToHotwordDetection()
-                    }
-                    "rewind ten" -> {
-                        SpotifyController.getInstance()?.rewind(10)
-                        switchToHotwordDetection()
-                    }
-                    "whisper" -> {
-                        DebugLogger.serviceLog(TAG, "Whisper command detected - future extension point")
-                        // Future: switchToWhisperMode()
-                        switchToHotwordDetection()
-                    }
-                    else -> {
-                        DebugLogger.serviceLog(TAG, "Unknown command: $command")
-                    }
+            val command = JSONObject(resultJson).getString("text").trim().lowercase()
+            if (!command.startsWith("jarvis") || command !in prefixedCommands) return // first enhancement: only react to jarvis
+
+            DebugLogger.serviceLog(TAG, "Recognized command: $command")
+
+            when {
+                command == "jarvis play" || command == "jarvis pause" || command == "jarvis stop" -> SpotifyController.playPause()
+                command == "jarvis next" -> SpotifyController.skipToNext()
+                command == "jarvis previous" -> SpotifyController.skipToPrevious()
+
+                command.startsWith("jarvis skip") -> {
+                    val numPart = command.removePrefix("jarvis skip").trim()
+                    val num = numPart.toIntOrNull() ?: numberWords[numPart] ?: 10
+                    SpotifyController.forward(num)
                 }
+
+                command.startsWith("jarvis rewind") -> {
+                    val numPart = command.removePrefix("jarvis rewind").trim()
+                    val num = numPart.toIntOrNull() ?: numberWords[numPart] ?: 10
+                    SpotifyController.rewind(num)
+                }
+
+                else -> DebugLogger.serviceLog(TAG, "Unknown command: $command")
             }
         } catch (e: Exception) {
             DebugLogger.e(TAG, "Error handling command", e, showToast = true, showNotif = true)
-            switchToHotwordDetection()
         }
     }
-    
-    private fun getKeywordPath(keywordName: String): String {
-        // This should return the path to your Jarvis keyword file
-        return copyKeywordFileIfNeeded("${keywordName}_android.ppn")
-    }
-    
-    private fun copyKeywordFileIfNeeded(fileName: String): String {
-        val outFile = File(filesDir, fileName)
-        if (outFile.exists()) return outFile.absolutePath
-        
-        try {
-            assets.open(fileName).use { input ->
-                FileOutputStream(outFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
-        } catch (e: Exception) {
-            DebugLogger.e(TAG, "Failed to copy keyword file: $fileName", e)
-        }
-        
-        return outFile.absolutePath
-    }
-    
+
+
+
+
+    /*** Asset helpers ***/
     private fun copyAssetFolderIfNeeded(assetName: String): String {
         val outDir = File(filesDir, assetName)
-        if (outDir.exists()) return outDir.absolutePath
+        if (!outDir.exists()) outDir.mkdirs()
 
-        outDir.mkdirs()
-
-        val assetManager = assets
-        val files = assetManager.list(assetName) ?: return outDir.absolutePath
-
+        val files = assets.list(assetName) ?: return outDir.absolutePath
         for (file in files) {
             val inPath = "$assetName/$file"
-            val outPath = File(outDir, file)
-
-            val subFiles = assetManager.list(inPath)
-            if (subFiles.isNullOrEmpty()) {
-                // It's a file
-                assetManager.open(inPath).use { input ->
-                    FileOutputStream(outPath).use { output ->
-                        input.copyTo(output)
-                    }
+            val outFile = File(outDir, file)
+            if (assets.list(inPath).isNullOrEmpty()) {
+                assets.open(inPath).use { input ->
+                    FileOutputStream(outFile).use { output -> input.copyTo(output) }
                 }
-            } else {
-                // It's a directory → recurse
-                copyAssetFolderIfNeeded(inPath)
-            }
+            } else copyAssetFolderIfNeeded(inPath)
         }
-
         return outDir.absolutePath
     }
-    
+
+    /*** Cleanup ***/
     private fun cleanup() {
         try {
             audioRecord?.stop()
             audioRecord?.release()
             echoCanceler?.release()
             noiseSuppressor?.release()
-            porcupine?.delete()
             voskRecognizer?.close()
             voskModel?.close()
         } catch (e: Exception) {
-            DebugLogger.e(TAG, "Error during cleanup", e, showToast = true, showNotif = true)
+            DebugLogger.e(TAG, "Cleanup error", e, showToast = true, showNotif = true)
         }
-        
         audioRecord = null
         echoCanceler = null
         noiseSuppressor = null
-        porcupine = null
         voskRecognizer = null
         voskModel = null
-        
         isRunning = false
-        currentState = PipelineState.STOPPED
         DebugLogger.serviceLog(TAG, "Pipeline cleanup completed")
     }
 }
