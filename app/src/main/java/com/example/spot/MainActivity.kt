@@ -19,9 +19,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var spotify: SpotifyController
     // KnockDetector instance
     private lateinit var knockDetector: KnockDetector
-
-    // HotwordDetector instance (now a thin wrapper that starts/stops the service)
-    private lateinit var hotwordDetector: HotWordDetector
+    // DebugLogger instance
+    private val debugLogger = DebugLogger
 
     // Toast instance
     private var toast: Toast? = null
@@ -37,7 +36,7 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
             val allGranted = results.entries.all { it.value }
             if (allGranted) {
-                startHotwordService()
+                startAudioPipelineService()
             } else {
                 Toast.makeText(this, "Permissions denied", Toast.LENGTH_SHORT).show()
             }
@@ -49,7 +48,7 @@ class MainActivity : AppCompatActivity() {
 
         spotify = SpotifyController(this)
         knockDetector = KnockDetector(this)
-        hotwordDetector = HotWordDetector(this) 
+        debugLogger.init(this)
 
         // Connect to Spotify
         spotify.connect() {
@@ -65,7 +64,7 @@ class MainActivity : AppCompatActivity() {
 
             // Start detectors
             knockDetector.start()
-            // Start the hotword foreground service (requests permissions first if needed)
+            // Start the audio pipeline service (requests permissions first if needed)
             ensurePermissionsAndStartService()
         }
 
@@ -106,13 +105,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
-
     override fun onDestroy() {
         super.onDestroy()
         knockDetector.stop()
-        // Stop the service when activity is destroyed (optional; if you want it persistent, remove this)
-        stopHotwordService()
+        // Stop the audio pipeline service
+        stopAudioPipelineService()
         spotify.disconnect()
     }
 
@@ -133,28 +130,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (permsToRequest.isEmpty()) {
-            startHotwordService()
+            startAudioPipelineService()
         } else {
             requestPermissionsLauncher.launch(permsToRequest.toTypedArray())
         }
     }
 
-    private fun startHotwordService() {
+    private fun startAudioPipelineService() {
         try {
-            hotwordDetector.startService()
-            showToast("Hotword service starting")
+            AudioPipelineService.startService(this)
+            showToast("Voice control started - Say 'Jarvis' followed by commands")
+            Log.d("MainActivity", "Audio pipeline service started successfully")
         } catch (t: Throwable) {
-            Log.e("MainActivity", "Failed to start hotword service", t)
-            showToast("Failed to start hotword service: ${t.message}")
+            Log.e("MainActivity", "Failed to start audio pipeline service", t)
+            showToast("Failed to start voice control: ${t.message}")
         }
     }
 
-    private fun stopHotwordService() {
+    private fun stopAudioPipelineService() {
         try {
-            hotwordDetector.stopService()
-            showToast("Hotword service stopped")
+            AudioPipelineService.stopService(this)
+            showToast("Voice control stopped")
+            Log.d("MainActivity", "Audio pipeline service stopped")
         } catch (t: Throwable) {
-            Log.e("MainActivity", "Failed to stop hotword service", t)
+            Log.e("MainActivity", "Failed to stop audio pipeline service", t)
         }
     }
 
