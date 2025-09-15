@@ -27,9 +27,22 @@ android {
         versionName = "1.0"
 
         // Inject secrets from local.properties
-        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${localProps["SPOTIFY_CLIENT_ID"]}\"")
-        buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"${localProps["SPOTIFY_REDIRECT_URI"]}\"")
-        buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${localProps["PICOVOICE_ACCESS_KEY"]}\"")
+        
+        buildConfigField(
+            "String",
+            "SPOTIFY_CLIENT_ID",
+            "\"${if (localProps.getProperty("SPOTIFY_CLIENT_ID") != null) localProps.getProperty("SPOTIFY_CLIENT_ID") else if (project.hasProperty("SPOTIFY_CLIENT_ID")) project.property("SPOTIFY_CLIENT_ID") else ""}\""
+        )
+        buildConfigField(
+            "String",
+            "SPOTIFY_REDIRECT_URI",
+            "\"${if (localProps.getProperty("SPOTIFY_REDIRECT_URI") != null) localProps.getProperty("SPOTIFY_REDIRECT_URI") else if (project.hasProperty("SPOTIFY_REDIRECT_URI")) project.property("SPOTIFY_REDIRECT_URI") else ""}\""
+        )
+        buildConfigField(
+            "String",
+            "PICOVOICE_ACCESS_KEY",
+            "\"${if (localProps.getProperty("PICOVOICE_ACCESS_KEY") != null) localProps.getProperty("PICOVOICE_ACCESS_KEY") else if (project.hasProperty("PICOVOICE_ACCESS_KEY")) project.property("PICOVOICE_ACCESS_KEY") else ""}\""
+        )
     }
 
     buildTypes {

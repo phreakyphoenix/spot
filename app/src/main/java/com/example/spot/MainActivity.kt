@@ -100,6 +100,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btn_hi).setOnClickListener {
             Log.d("MainActivity", "Hi")
+            SpotifyController.playPlaylist("spotify:track:5ivRSlOhVIXN2QMzqgsX0s")
             showToast("Hi")
         }
     }
